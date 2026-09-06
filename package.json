@@ -1,0 +1,28 @@
+{
+  "name": "llm-gateway",
+  "version": "1.0.0",
+  "description": "AI Request Gateway - routing, failover, rate limiting across LLM providers",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "migrate": "node src/db/migrate.js",
+    "test": "node --test test/",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.11.5",
+    "ioredis": "^5.4.1",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0",
+    "eslint": "^9.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

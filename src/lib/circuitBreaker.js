@@ -11,6 +11,7 @@ function keyFor(providerId) {
 
 async function getState(providerId) {
   const data = await redis.hgetall(keyFor(providerId));
+  console.error(`[CB DEBUG] getState(${providerId}) raw redis data:`, JSON.stringify(data));
   return {
     state: data.state || 'closed',
     failures: parseInt(data.failures || '0', 10),
@@ -49,11 +50,14 @@ async function recordFailure(providerId) {
   }
 
   const newFailures = failures + 1;
+  console.error(`[CB DEBUG] recordFailure(${providerId}) current failures=${failures}, writing newFailures=${newFailures}`);
   if (newFailures >= FAILURE_THRESHOLD) {
     await redis.hset(key, 'state', 'open', 'openedAt', Date.now(), 'failures', newFailures);
+    console.error(`[CB DEBUG] threshold hit, circuit OPENED for provider ${providerId}`);
   } else {
     await redis.hset(key, 'failures', newFailures);
     await redis.expire(key, WINDOW_SECONDS); // failure count resets if window passes with no more failures
+    console.error(`[CB DEBUG] wrote failures=${newFailures} to key=${key}`);
   }
 }
 

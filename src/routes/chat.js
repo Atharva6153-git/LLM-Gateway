@@ -40,6 +40,14 @@ chatRouter.post('/', async (req, res) => {
 
   if (!allowed) {
     res.set('Retry-After', '1');
+    try {
+      await pool.query(
+        'INSERT INTO request_log (client_id, provider_id, status, latency_ms) VALUES ($1, $2, $3, $4)',
+        [client.id, null, 'rate_limited', null]
+      );
+    } catch (err) {
+      console.error('[chat] rate_limited log failed:', err.message);
+    }
     return res.status(429).json({ error: 'rate limit exceeded' });
   }
 

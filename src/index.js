@@ -18,6 +18,14 @@ app.use('/metrics', adminAuth, metricsRouter);
 
 app.use((req, res) => res.status(404).json({ error: 'not found' }));
 
+// last-resort guard for sync throws and next(err); async handlers must
+// catch their own rejections since Express 4 does not. 4-arity signature is
+// what makes Express treat this as the error handler.
+app.use((err, req, res, _next) => {
+  console.error('[http] unhandled error:', err.message);
+  res.status(500).json({ error: 'internal gateway error' });
+});
+
 startRetentionJob();
 
 const PORT = process.env.PORT || 3000;

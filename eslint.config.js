@@ -23,6 +23,8 @@ module.exports = [
     },
     rules: {
       'no-console': 'off',
+      // Express error handlers must declare 4-arity (err, req, res, next)
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
 ];

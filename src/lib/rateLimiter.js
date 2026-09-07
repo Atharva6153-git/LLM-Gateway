@@ -1,5 +1,10 @@
 const redis = require('../db/redis');
 
+// fail-open by default (PRD open decision #1). Set RATE_LIMIT_FAIL_OPEN=false
+// to reject requests (503) instead of admitting unlimited traffic during a
+// redis outage — trade availability for spend/cost control.
+const FAIL_CLOSED = process.env.RATE_LIMIT_FAIL_OPEN === 'false';
+
 
 const TOKEN_BUCKET_LUA = `
 local key = KEYS[1]
@@ -44,6 +49,11 @@ async function allowRequest(clientId, bucketSize, refillRate) {
     );
     return result === 1;
   } catch (err) {
+    if (FAIL_CLOSED) {
+      const e = new Error('rate limiter unavailable');
+      e.code = 'RATE_LIMITER_UNAVAILABLE';
+      throw e;
+    }
     console.error('[rateLimiter] redis unavailable, failing open:', err.message);
     return true;
   }

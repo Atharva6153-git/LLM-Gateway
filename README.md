@@ -46,4 +46,23 @@ requests get routed to next healthy provider (add a real one, e.g. Groq, in
 the `providers` table to see actual failover — with only 1 provider it'll
 just start returning 503).
 
-Check `/metrics` to see circuit state and request counts.
+Check `/metrics` to see circuit state and request counts (requires
+`x-admin-key` — set `ADMIN_API_KEY` in the env file).
+
+## Deploying
+
+- Requirements: Docker + Docker Compose, Node >=20 for host tooling.
+- Secrets live only in gitignored env files — `.env.docker` (compose) or
+  `.env.local` (host). The committed `.env.example` is the template; create
+  the real file from it and never commit it. `.dockerignore` keeps env files
+  out of image layers.
+- Apply schema migrations to an existing DB with `npm run migrate` (init
+  scripts only run on first postgres init); fresh `docker compose up` seeds
+  automatically.
+- Set `ADMIN_API_KEY` before exposing `/metrics`, and override the sample
+  `test123` client. `RATE_LIMIT_FAIL_OPEN=false` makes the gateway reject
+  503s instead of admitting unlimited traffic if Redis goes down.
+- Terminate TLS at a reverse proxy (Caddy/nginx) in front of :3000; the app
+  itself speaks plain HTTP. Healthchecks + `restart: unless-stopped` are
+  baked into docker-compose.yml.
+- Quality gates: `npm run lint`, `npm test`, `npm audit`.

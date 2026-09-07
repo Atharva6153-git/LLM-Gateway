@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.docker
+.env.local
+.env.*
+*.log
+.git/
+.gitignore
+docs/
+README.md
+CLAUDE.md
+test/
+mock-provider/

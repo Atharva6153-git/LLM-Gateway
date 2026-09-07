@@ -3,21 +3,40 @@ const pool = require('../db/pool');
 const router = require('../lib/router');
 const rateLimiter = require('../lib/rateLimiter');
 
+const MAX_TOKENS = parseInt(process.env.MAX_TOKENS || '8192', 10);
+
 const chatRouter = express.Router();
 
+function clampMaxTokens(raw) {
+  if (raw == null) return undefined;
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return Math.min(n, MAX_TOKENS);
+}
+
 chatRouter.post('/', async (req, res) => {
-  const client = req.client; 
-  const { prompt, max_tokens } = req.body;
+  const client = req.client;
+  const prompt = req.body.prompt;
+  const max_tokens = clampMaxTokens(req.body.max_tokens);
 
   if (!prompt) {
     return res.status(400).json({ error: 'prompt is required' });
   }
 
-  const allowed = await rateLimiter.allowRequest(
-    client.id,
-    client.bucket_size,
-    client.refill_rate
-  );
+  let allowed;
+  try {
+    allowed = await rateLimiter.allowRequest(
+      client.id,
+      client.bucket_size,
+      client.refill_rate
+    );
+  } catch (err) {
+    if (err.code === 'RATE_LIMITER_UNAVAILABLE') {
+      return res.status(503).json({ error: 'rate limiter unavailable, try again shortly' });
+    }
+    console.error('[chat] rate limiter error:', err.message);
+    return res.status(500).json({ error: 'internal gateway error' });
+  }
 
   if (!allowed) {
     res.set('Retry-After', '1');
@@ -46,7 +65,7 @@ chatRouter.post('/', async (req, res) => {
     if (err.code === 'NO_PROVIDERS' || err.code === 'ALL_FAILED') {
       return res.status(503).json({ error: 'all providers unavailable, try again shortly' });
     }
-    console.error('[chat] unexpected error:', err);
+    console.error('[chat] unexpected error code=' + err.code + ' msg=' + err.message);
     return res.status(500).json({ error: 'internal gateway error' });
   }
 });

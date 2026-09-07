@@ -27,6 +27,14 @@ services:
         sync: false
       - key: ADMIN_API_KEY
         sync: false
+      - key: SEED_CLIENT_KEY
+        sync: false      # optional: raw key; gateway creates this client on boot
+      - key: SEED_CLIENT_NAME
+        value: seed-client
+      - key: SEED_BUCKET_SIZE
+        value: "20"
+      - key: SEED_REFILL_RATE
+        value: "5"
       - key: RATE_LIMIT_FAIL_OPEN
         value: "false"         # fail closed in prod — never allow unmetered traffic
       - key: LOG_RETENTION_DAYS

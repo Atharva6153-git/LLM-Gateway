@@ -84,7 +84,8 @@ on; with only one provider you'll see `503 all providers unavailable`. Check
 
 - **Render:** copy `render.yaml` (blueprint) → create Postgres service, plug
   its URL into `DATABASE_URL`, provide `REDIS_URL`, set `GROQ_API_KEY` /
-  `ADMIN_API_KEY`, push. 
+  `ADMIN_API_KEY`, push. Set `SEED_CLIENT_KEY` to a raw API key and the
+  gateway inserts that client on first boot — no SQL console needed. 
   ```bash
   # Railway (services + volumes for postgres/redis)
   railpack up   # or create a Blueprint from render.yaml

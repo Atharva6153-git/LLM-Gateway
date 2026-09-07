@@ -4,6 +4,7 @@ const { authMiddleware } = require('./middleware/auth');
 const { adminAuth } = require('./middleware/adminAuth');
 const securityHeaders = require('./middleware/securityHeaders');
 const { startRetentionJob } = require('./db/retention');
+const { seedClient } = require('./db/seedClient');
 const chatRouter = require('./routes/chat');
 const metricsRouter = require('./routes/metrics');
 
@@ -27,6 +28,10 @@ app.use((err, req, res, _next) => {
 });
 
 startRetentionJob();
+
+// optional: create a starter client from env (SEED_CLIENT_KEY) so fresh
+// deploys need no SQL; failure here must never block boot
+seedClient().catch((err) => console.error('[seed] failed:', err.message));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

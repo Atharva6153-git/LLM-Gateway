@@ -47,11 +47,9 @@ async function forward(payload) {
         data: res.data,
       };
     } catch (err) {
-  console.error(`[router] DEBUG provider=${provider.id} failed: ${err.message}`);
-  await circuitBreaker.recordFailure(provider.id);
-  console.error(`[router] DEBUG recordFailure(${provider.id}) completed`);
-  lastError = err;
-}
+      await circuitBreaker.recordFailure(provider.id);
+      lastError = err;
+    }
   }
 
   const err = new Error('all healthy providers failed on this request');

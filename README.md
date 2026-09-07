@@ -11,6 +11,9 @@ cp .env.example .env
 docker compose up --build
 ```
 
+> Env files: `npm run dev` on the host uses `.env.local` (localhost); Docker
+> (`docker compose up`) uses `.env.docker` (service names postgres/redis).
+
 This starts: postgres (auto-runs migration), redis, mock-provider (fake LLM
 for failover demo), and the gateway on :3000.
 

@@ -6,8 +6,10 @@ node_modules/
 *.log
 .git/
 .gitignore
+.github/
 docs/
 README.md
 CLAUDE.md
+render.yaml
 test/
 mock-provider/

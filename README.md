@@ -2,101 +2,174 @@
 
 [![CI](https://github.com/Atharva6153-git/LLM-Gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Atharva6153-git/LLM-Gateway/actions/workflows/ci.yml)
 
-AI Request Gateway — **one API in front of multiple LLM providers** with
-circuit-breaker failover and per-client token-bucket rate limiting. Providers
-and clients are **DB rows**, so swapping providers or adding traffic limits
-needs no code change or redeploy. See `docs/prd-llm-gateway.md` for the full
-spec and open decisions.
+One API in front of multiple LLM providers — with automatic circuit-breaker
+failover and per-client token-bucket rate limiting.
+
+- **Providers are DB rows** — add, remove, or re-prioritize an LLM provider with
+  an `INSERT`, no code change or redeploy.
+- **Clients are DB rows** — per-API-key rate limits configured in the database.
+- **Failover by default** — if a provider trips its circuit breaker, traffic
+  rolls to the next healthy one.
+
+---
+
+## Table of contents
+
+1. [Architecture](#architecture)
+2. [Endpoints](#endpoints)
+3. [Quick start (localhost)](#quick-start-localhost)
+4. [Configuration](#configuration)
+5. [Key behaviors](#key-behaviors)
+6. [Testing](#testing)
+7. [Deploying](#deploying)
+
+---
 
 ## Architecture
 
 ![request flow](docs/architecture.svg)
 
-**Request lifecycle:** `POST /v1/chat` → auth (`sha256` of `x-api-key` vs
-`api_clients`) → Redis token-bucket rate limit → failover router (providers by
-`priority`, most-preferred first, each gated by a Redis circuit breaker)
-→ per-provider adapter (`flat`/`openai` body shapes) → `request_log` row →
-normalized `{provider, latency_ms, response}`.
-
-## Facts & defaults (what you'll be quizzed on)
-
-- Auth: `api_clients.api_key_hash` = sha256 hex of the raw key. 401 on miss.
-- Rate limit: token bucket in redis `bucket:{id}`, capacity/refill *per client
-  row*. 429 + `Retry-After: 1` on empty. **Fails open** unless
-  `RATE_LIMIT_FAIL_OPEN=false` → then 503 on Redis outage (fail closed).
-- Circuit breaker: `3 failures / 30s window` → open for `60s cooldown` →
-  `half_open` admits exactly one trial (`hsetnx`), success resets the circuit.
-  Redis `circuit:{id}`. Tuning read from env at boot.
-- Failover: providers ordered by `priority` ascending; on `ALL_FAILED` → 503.
-  Measured here: mock ~16 ms, Groq ~300–370 ms per call; each healthy
-  provider is tried exactly once per request.
-- Secrets: only hashes stored; raw keys never logged; `.dockerignore` keeps
-  env files out of image layers; admin endpoints require `x-admin-key`
-  (constant-time compare).
-- Metrics: `/metrics` (admin) = per-provider success/failure + avg latency +
-  circuit state + `rate_limited_total`. Retention prunes `request_log` after
-  30 days.
-- Security posture: nosniff / frame-deny / no-store headers, auth
-  brute-force lockout (5 strikes / 60 s per IP), `max_tokens` clamped,
-  non-root container (`USER node`), healthchecked compose.
-
-## Run locally
-
 ```
-cp .env.example .env.docker
-docker compose up --build
+POST /v1/chat
+  → 1. Auth        sha256(x-api-key) vs api_clients (Postgres)     401 on miss
+  → 2. Rate limit  token bucket (Redis Lua, atomic)                429 when empty
+  → 3. Failover    providers sorted by priority (lowest first),
+                   each gated by a circuit breaker (Redis)         503 if all fail
+  → 4. Adapter     per-provider body shape (flat / openai)
+  → 5. Log         request_log row → normalized JSON response
 ```
 
-> Env files: Docker (`docker compose up`) uses `.env.docker` (service names
-> postgres/redis); `npm run dev` on the host uses localhost in `.env.local`.
-> `.dockerignore` excludes env files from image builds.
+Postgres is the source of truth (clients, providers, request_log). Redis holds
+ephemeral runtime state (circuits, buckets) and can go away safely.
 
-Starts: postgres (auto-runs init migrations), redis, mock-provider (fake LLM
-for failover demo), gateway on :3000.
+## Endpoints
 
-## Create a test client
+| Method | Path        | Auth                  | Purpose                          |
+| ------ | ----------- | --------------------- | -------------------------------- |
+| GET    | `/`         | —                     | Endpoint index                   |
+| GET    | `/health`   | —                     | Liveness probe (always 200)      |
+| GET    | `/status`   | —                     | Reports `db` / `redis` health    |
+| POST   | `/v1/chat`  | `x-api-key` header    | Chat completion with failover    |
+| GET    | `/metrics`  | `x-admin-key` header  | Per-provider stats + circuit state |
 
-```sql
-INSERT INTO api_clients (name, api_key_hash, bucket_size, refill_rate)
-VALUES ('test-client', encode(digest('test123', 'sha256'), 'hex'), 20, 5);
-```
+**Chat request**
 
-## Try it
-
-```
+```bash
 curl -X POST localhost:3000/v1/chat \
   -H "x-api-key: test123" \
   -H "Content-Type: application/json" \
   -d '{"prompt": "hello"}'
 ```
 
-## Demo the failover
+**Chat response**
 
+```json
+{
+  "provider": "mock",
+  "latency_ms": 16,
+  "response": { "text": "…", "model": "mock-model-v1" }
+}
 ```
+
+## Quick start (localhost)
+
+```bash
+cp .env.example .env.docker
+docker compose up --build
+```
+
+| What starts     | Port  | Notes                                   |
+| --------------- | ----- | --------------------------------------- |
+| gateway         | 3000  | the API                                 |
+| postgres        | 5432  | auto-runs init migrations, seeds providers |
+| redis           | 6379  | rate-limit buckets + circuit state      |
+| mock-provider   | 4000  | fake LLM for the failover demo          |
+
+Create a test client (raw key `test123`):
+
+```sql
+INSERT INTO api_clients (name, api_key_hash, bucket_size, refill_rate)
+VALUES ('test-client', encode(digest('test123', 'sha256'), 'hex'), 20, 5);
+```
+
+Or skip the SQL entirely — set `SEED_CLIENT_KEY` in the env file and the
+gateway inserts the client on first boot.
+
+**Demo the failover**
+
+```bash
 curl -X POST localhost:4000/simulate-fail -d '{"failing": true}' -H "Content-Type: application/json"
 ```
 
-Hit `/v1/chat` 3+ times — circuit opens on the `mock` provider, traffic moves
-on; with only one provider you'll see `503 all providers unavailable`. Check
-`/metrics` (requires `x-admin-key` — set `ADMIN_API_KEY`).
+Hit `/v1/chat` 3+ times — the `mock` provider's circuit opens (503s) and
+traffic moves on. Recovery: `{"failing": false}`.
+
+> **Env file gotcha:** Docker uses `.env.docker` (service names); host
+> `npm run dev` uses `.env.local`. `.dockerignore` keeps env files out of
+> image builds.
+
+## Configuration
+
+`.env.example` documents every variable. Runtime behavior is read from DB rows
+(`api_clients`, `providers`), not env — the key ones:
+
+| Variable                   | Default | Meaning                                        |
+| -------------------------- | ------- | ---------------------------------------------- |
+| `DATABASE_URL`             | —       | Postgres connection string                     |
+| `REDIS_URL`                | —       | Redis connection string (optional locally)     |
+| `GROQ_API_KEY`             | —       | Real provider key (referenced by `providers.api_key_env`) |
+| `ADMIN_API_KEY`            | —       | Required for `/metrics`; unset → denied        |
+| `SEED_CLIENT_KEY`          | —       | On boot, creates this client (no SQL needed)   |
+| `RATE_LIMIT_FAIL_OPEN`     | `true`  | `false` → 503 on Redis outage (fail closed)    |
+| `MAX_TOKENS`               | `8192`  | Clamp for client-supplied `max_tokens`         |
+| `LOG_RETENTION_DAYS`       | `30`    | Prunes `request_log`; `0` disables             |
+| `AUTH_MAX_FAILURES`        | `5`     | Per-IP brute-force lockout threshold           |
+| `AUTH_FAIL_WINDOW_SECONDS` | `60`    | Lockout window after failures                  |
+| `CB_FAILURE_THRESHOLD`     | `3`     | Failures before a circuit opens (30s window)   |
+| `CB_COOLDOWN_SECONDS`      | `60`    | How long an open circuit stays shut            |
+
+## Key behaviors
+
+- **Circuit breaker** — `3` failures in `30s` window opens a circuit for `60s`;
+  then `half_open` admits exactly one trial request; success resets it.
+- **Rate limit** — token bucket; capacity/refill per client row; `429` +
+  `Retry-After: 1` when empty.
+- **Failover** — providers tried in `priority` order, once each; all failed →
+  `503`. Measured locally: mock ~16 ms, Groq ~300–370 ms per call.
+- **Secrets** — only sha256 hashes stored; raw keys never logged; env files
+  excluded from the image; constant-time compare for admin keys.
+- **Security posture** — nosniff / frame-deny / no-store headers, `max_tokens`
+  clamped, non-root container (`USER node`), healthchecked services.
+
+## Testing
+
+```bash
+npm run lint     # eslint (flat config)
+npm test         # node:test unit tests
+npm audit        # dependency audit (0 known vulns)
+```
+
+All three run automatically in CI (GitHub Actions) on every push/PR, plus a
+`docker build` to catch Dockerfile regressions.
 
 ## Deploying
 
-- **Render:** copy `render.yaml` (blueprint) → create Postgres service, plug
-  its URL into `DATABASE_URL`, provide `REDIS_URL`, set `GROQ_API_KEY` /
-  `ADMIN_API_KEY`, push. Set `SEED_CLIENT_KEY` to a raw API key and the
-  gateway inserts that client on first boot — no SQL console needed. 
-  ```bash
-  # Railway (services + volumes for postgres/redis)
-  railpack up   # or create a Blueprint from render.yaml
-  # Fly.io with the deploy Dockerfile
-  fly launch --no-deploy && fly secrets set DATABASE_URL=... REDIS_URL=...
-  ```
-  TLS is terminated at the platform; the app is plain HTTP behind it.
-- Apply migrations to an *existing* DB with `npm run migrate`; fresh
-  platforms run them automatically.
-- For prod consider `RATE_LIMIT_FAIL_OPEN=false` (reject 503s instead of
-  unmetered traffic during a Redis outage).
-- Replace or lock down the seeded `test123` client and the default
-  `ADMIN_API_KEY` before exposing publicly.
-- Quality gates: `npm run lint`, `npm test`, `npm audit` (all in CI).
+The fastest path on **Render**:
+
+1. Create a Postgres service → copy its **Internal Database URL**.
+2. **New → Web Service** → `LLM-Gateway` repo → **runtime: Docker**.
+3. In **Environment**: `DATABASE_URL`, `GROQ_API_KEY`, `ADMIN_API_KEY`,
+   `SEED_CLIENT_KEY`, and `RATE_LIMIT_FAIL_OPEN=false` (strict prod).
+4. Deploy. Migrations apply on first boot; the seed client is created
+   automatically.
+
+Notes:
+
+- A `render.yaml` blueprint lives in the repo as an alternative path.
+- Terminate TLS at the platform (Caddy/nginx/Render proxy) — the app speaks
+  plain HTTP behind it.
+- Apply migrations to an *existing* DB with `npm run migrate` (init scripts
+  only run on fresh databases).
+- Replace the demo `test123` client and default admin key before going public.
+- `mock-provider` only exists in Docker — on Render it opens its circuit and
+  Groq handles traffic, which is the failover story working as designed.

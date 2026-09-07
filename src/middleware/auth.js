@@ -5,8 +5,7 @@ function hashKey(rawKey) {
   return crypto.createHash('sha256').update(rawKey).digest('hex');
 }
 
-// attaches req.client on success. Never forwards unauthenticated requests
-// to any provider, never counts them against any rate-limit bucket.
+
 async function authMiddleware(req, res, next) {
   const rawKey = req.header('x-api-key');
   if (!rawKey) {

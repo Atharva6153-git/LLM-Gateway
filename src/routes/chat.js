@@ -6,7 +6,7 @@ const rateLimiter = require('../lib/rateLimiter');
 const chatRouter = express.Router();
 
 chatRouter.post('/', async (req, res) => {
-  const client = req.client; // set by authMiddleware
+  const client = req.client; 
   const { prompt, max_tokens } = req.body;
 
   if (!prompt) {

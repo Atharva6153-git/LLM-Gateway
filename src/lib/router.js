@@ -1,6 +1,7 @@
 const axios = require('axios');
 const pool = require('../db/pool');
 const circuitBreaker = require('./circuitBreaker');
+const { endpointFor, buildBody, parseResponse } = require('./adapters');
 
 async function getHealthyProviders() {
   const { rows } = await pool.query(
@@ -16,8 +17,7 @@ async function getHealthyProviders() {
   return healthy;
 }
 
-// tries providers in priority order until one succeeds, records success/failure
-// per attempt, returns normalized response. Throws only if ALL providers fail.
+
 async function forward(payload) {
   const providers = await getHealthyProviders();
   if (providers.length === 0) {
@@ -32,8 +32,8 @@ async function forward(payload) {
     try {
       const apiKey = process.env[provider.api_key_env] || '';
       const res = await axios.post(
-        `${provider.base_url}/chat`,
-        payload,
+        endpointFor(provider),
+        buildBody(provider, payload),
         {
           headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
           timeout: 10000,
@@ -44,7 +44,7 @@ async function forward(payload) {
         providerId: provider.id,
         providerName: provider.name,
         latencyMs: Date.now() - start,
-        data: res.data,
+        data: parseResponse(provider, res.data),
       };
     } catch (err) {
       await circuitBreaker.recordFailure(provider.id);

@@ -1,8 +1,6 @@
 const redis = require('../db/redis');
 
-// atomic token-bucket refill+consume in one round trip — avoids read-then-write race
-// KEYS[1] = bucket key
-// ARGV[1] = bucket_size, ARGV[2] = refill_rate (tokens/sec), ARGV[3] = now (ms)
+
 const TOKEN_BUCKET_LUA = `
 local key = KEYS[1]
 local capacity = tonumber(ARGV[1])
@@ -34,9 +32,6 @@ else
 end
 `;
 
-// returns true if request allowed. FAILS OPEN if redis is unreachable —
-// see PRD open question #1: rate limiting is best-effort, not a source of truth
-// for security, so a redis outage should not take down the whole gateway.
 async function allowRequest(clientId, bucketSize, refillRate) {
   try {
     const result = await redis.eval(

@@ -32,8 +32,6 @@ metricsRouter.get('/', async (req, res) => {
       rate_limited_total: rateLimited[0]?.count || 0,
     });
   } catch (err) {
-    // Express 4 doesn't catch rejected promises in async handlers — a DB or
-    // Redis failure here would otherwise reject unhandled and crash the process.
     console.error('[metrics] unexpected error:', err);
     res.status(500).json({ error: 'internal gateway error' });
   }

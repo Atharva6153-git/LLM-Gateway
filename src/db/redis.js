@@ -6,7 +6,7 @@ const redis = new Redis(process.env.REDIS_URL, {
 });
 
 redis.on('error', (err) => {
-  // do not crash process on redis error — gateway must fail-open on rate limiter, see lib/rateLimiter.js
+  
   console.error('[redis] connection error:', err.message);
 });
 

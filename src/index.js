@@ -13,6 +13,12 @@ app.use(express.json());
 app.use(securityHeaders);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/', (req, res) =>
+  res.json({
+    service: 'llm-gateway',
+    endpoints: { health: '/health', chat: '/v1/chat', metrics: '/metrics' },
+  })
+);
 
 app.use('/v1/chat', authMiddleware, chatRouter);
 app.use('/metrics', adminAuth, metricsRouter);
